@@ -2,6 +2,7 @@ const std = @import("std");
 const platform = @import("platform.zig");
 const gpu = @import("gpu.zig");
 const shader_manager = @import("shader_manager.zig");
+const ui = @import("ui.zig");
 const c = gpu.c;
 
 pub fn main() !void {
@@ -17,11 +18,20 @@ pub fn main() !void {
     // Default valid pipeline state
     var current_pipeline: ?c.WGPURenderPipeline = null;
 
-    var watcher = shader_manager.ShaderWatcher.init(allocator, "shader.wgsl");
-
     const format = c.WGPUTextureFormat_BGRA8Unorm;
+    
+    var ui_state = ui.UiState.init(allocator);
+    defer ui_state.deinit();
+    
+    var ui_renderer = try ui.UiRenderer.init(gpu_state.device, format);
+    
+    var active_shader_path: [256]u8 = undefined;
+    var active_shader_len: usize = "shader.wgsl".len;
+    @memcpy(active_shader_path[0..active_shader_len], "shader.wgsl");
 
-    const initial_pipeline = shader_manager.loadPipeline(allocator, gpu_state.device, gpu_state.bind_group_layout, "shader.wgsl", format) catch null;
+    var watcher = shader_manager.ShaderWatcher.init(allocator, active_shader_path[0..active_shader_len]);
+
+    const initial_pipeline = shader_manager.loadPipeline(allocator, gpu_state.device, gpu_state.bind_group_layout, active_shader_path[0..active_shader_len], format) catch null;
     if (initial_pipeline) |pl| {
         current_pipeline = pl;
         std.debug.print("Initial shader loaded successfully.\n", .{});
@@ -39,7 +49,7 @@ pub fn main() !void {
             std.debug.print("Shader modified! Recompiling...\n", .{});
 
             // Recompile
-            const new_pipeline = shader_manager.loadPipeline(allocator, gpu_state.device, gpu_state.bind_group_layout, "shader.wgsl", format) catch null;
+            const new_pipeline = shader_manager.loadPipeline(allocator, gpu_state.device, gpu_state.bind_group_layout, active_shader_path[0..active_shader_len], format) catch null;
 
             // if success, swap
             if (new_pipeline) |pl| {
@@ -60,9 +70,33 @@ pub fn main() !void {
         var w: i32 = 0;
         var h: i32 = 0;
         c.glfwGetFramebufferSize(window.handle, &w, &h);
+        
+        ui_state.char_input = platform.global_char;
+        ui_state.backspace_pressed = platform.global_backspace;
+        ui_state.beginFrame(&window);
+        platform.global_char = null;
+        platform.global_backspace = false;
+        
+        ui_state.textInput(1, &active_shader_path, &active_shader_len, 256, 10, 10, 300, 30);
+        if (ui_state.button(2, "Load Shader", 320, 10, 180, 30)) {
+            // Hot swap watching and re-trigger pipeline compile immediately
+            std.debug.print("Switching shader to {s}\n", .{active_shader_path[0..active_shader_len]});
+            watcher = shader_manager.ShaderWatcher.init(allocator, active_shader_path[0..active_shader_len]);
+            
+            const new_pipeline = shader_manager.loadPipeline(allocator, gpu_state.device, gpu_state.bind_group_layout, active_shader_path[0..active_shader_len], format) catch null;
+            if (new_pipeline) |pl| {
+                if (current_pipeline) |old_pl| {
+                    c.wgpuRenderPipelineRelease(old_pl);
+                }
+                current_pipeline = pl;
+                std.debug.print("Swapped pipeline to new shader file.\n", .{});
+            }
+        }
+        ui_state.endFrame();
 
         const uniforms = gpu.Uniforms{
             .time = t,
+            .padding = 0,
             .resolution = .{ @as(f32, @floatFromInt(w)), @as(f32, @floatFromInt(h)) },
         };
 
@@ -102,6 +136,8 @@ pub fn main() !void {
             // Draw fullscreen triangle (3 vertices, 1 instance)
             c.wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
         }
+        
+        ui_renderer.render(&ui_state, gpu_state.queue, pass, @floatFromInt(w), @floatFromInt(h));
 
         c.wgpuRenderPassEncoderEnd(pass);
         c.wgpuRenderPassEncoderRelease(pass);

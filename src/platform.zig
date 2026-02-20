@@ -2,6 +2,23 @@ const std = @import("std");
 const builtin = @import("builtin");
 const c = @import("gpu.zig").c;
 
+pub var global_char: ?u8 = null;
+pub var global_backspace: bool = false;
+
+fn charCallback(window: ?*c.GLFWwindow, codepoint: c_uint) callconv(.c) void {
+    _ = window;
+    if (codepoint >= 32 and codepoint < 128) {
+        global_char = @intCast(codepoint);
+    }
+}
+
+fn keyCallback(window: ?*c.GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.c) void {
+    _ = window; _ = scancode; _ = mods;
+    if (key == c.GLFW_KEY_BACKSPACE and (action == c.GLFW_PRESS or action == c.GLFW_REPEAT)) {
+        global_backspace = true;
+    }
+}
+
 pub const Window = struct {
     handle: *c.GLFWwindow,
 
@@ -9,7 +26,10 @@ pub const Window = struct {
         if (c.glfwInit() == 0) return error.GlfwInitFailed;
 
         c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_NO_API);
-        const handle = c.glfwCreateWindow(width, height, title, null, null) orelse return error.GlfwWindowFailed;
+        const handle = c.glfwCreateWindow(width, height, title, null, null) orelse return error.WindowCreationFailed;
+        
+        _ = c.glfwSetCharCallback(handle, charCallback);
+        _ = c.glfwSetKeyCallback(handle, keyCallback);
 
         return Window{ .handle = handle };
     }
