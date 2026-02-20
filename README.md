@@ -2,6 +2,7 @@
 
 minimal native desktop shader editor written in zig. uses `wgpu-native` c api directly and `glfw` for windowing
 
+<img alt="image" src="https://github.com/user-attachments/assets/862fb2f3-1d89-48a1-b4c9-5dcfe603decf" />
 
 ## `building`
 
