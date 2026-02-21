@@ -50,6 +50,15 @@ pub fn main() !void {
     var status_time: i64 = 0;
     var file_menu_open: bool = false;
     var wants_compile: bool = false;
+    var wants_open: bool = false;
+    var open_path_buf: [256]u8 = undefined;
+    var open_path_len: usize = 0;
+
+    // Active file tracking
+    var active_file: [256]u8 = undefined;
+    var active_file_len: usize = "shader.wgsl".len;
+    @memcpy(active_file[0..active_file_len], "shader.wgsl");
+    var watcher = shader_manager.ShaderWatcher.init(allocator, active_file[0..active_file_len]);
 
     const start_time = std.time.milliTimestamp();
 
@@ -61,9 +70,21 @@ pub fn main() !void {
 
         const input = platform.consumeInput();
 
-        // Feed input to editor (only when menu is closed)
-        if (!file_menu_open) {
+        // Feed input to editor (only when menu/dialog is closed)
+        if (!file_menu_open and !wants_open) {
             editor.handleInput(input);
+        }
+
+        // Hot-reload from file watcher
+        if (watcher.checkModified()) {
+            std.debug.print("File changed on disk, reloading...\n", .{});
+            const disk_src = std.fs.cwd().readFileAlloc(allocator, active_file[0..active_file_len], 1024 * 1024) catch null;
+            if (disk_src) |src| {
+                defer allocator.free(src);
+                editor.deinit();
+                editor = editor_mod.TextEditor.init(allocator, src);
+                wants_compile = true;
+            }
         }
 
         // Ctrl+S: compile from editor buffer
@@ -149,7 +170,7 @@ pub fn main() !void {
         }
 
         // File indicator
-        ui_state.drawText("shader.wgsl", 250.0, 8.0, .{ 0.5, 0.5, 0.5, 1.0 });
+        ui_state.drawText(active_file[0..active_file_len], 250.0, 8.0, .{ 0.5, 0.5, 0.5, 1.0 });
         // Shortcut hint
         ui_state.drawText("Ctrl+S compile", split + 8.0, 8.0, .{ 0.4, 0.4, 0.4, 1.0 });
 
@@ -173,9 +194,9 @@ pub fn main() !void {
         if (file_menu_open) {
             const menu_x: f32 = 0;
             const menu_y: f32 = menubar_h;
-            const menu_w: f32 = 200.0;
+            const menu_w: f32 = 300.0;
             const item_h: f32 = 28.0;
-            const items = [_][]const u8{ "New", "Save         Ctrl+S", "Save to file..." };
+            const items = [_][]const u8{ "New", "Open file...", "Save                 Ctrl+S", "Save to file..." };
             const menu_h: f32 = item_h * @as(f32, @floatFromInt(items.len)) + 4.0;
 
             // Shadow + background
@@ -195,19 +216,29 @@ pub fn main() !void {
                 if (item_hovered and ui_state.mouse_clicked) {
                     file_menu_open = false;
                     if (i == 0) {
-                        // New: clear editor
+                        // New
                         editor.deinit();
                         editor = editor_mod.TextEditor.init(allocator, "// New shader\n");
+                        active_file_len = 0;
                     } else if (i == 1) {
-                        // Save: compile
-                        wants_compile = true;
+                        // Open file dialog
+                        wants_open = true;
+                        open_path_len = 0;
                     } else if (i == 2) {
+                        // Save (compile)
+                        wants_compile = true;
+                    } else if (i == 3) {
                         // Save to file
                         const src = editor.getContent(allocator) catch null;
                         if (src) |content| {
                             defer allocator.free(content);
-                            std.fs.cwd().writeFile(.{ .sub_path = "shader.wgsl", .data = content }) catch {};
-                            std.debug.print("Saved to shader.wgsl\n", .{});
+                            if (active_file_len > 0) {
+                                std.fs.cwd().writeFile(.{ .sub_path = active_file[0..active_file_len], .data = content }) catch {};
+                                std.debug.print("Saved to {s}\n", .{active_file[0..active_file_len]});
+                            } else {
+                                std.fs.cwd().writeFile(.{ .sub_path = "shader.wgsl", .data = content }) catch {};
+                                std.debug.print("Saved to shader.wgsl\n", .{});
+                            }
                         }
                     }
                 }
@@ -222,6 +253,112 @@ pub fn main() !void {
                 if (!in_menu and !in_btn) {
                     file_menu_open = false;
                 }
+            }
+        }
+
+        // Open file dialog
+        if (wants_open) {
+            const dlg_w: f32 = 400.0;
+            const dlg_h: f32 = 100.0;
+            const dlg_x: f32 = (fw - dlg_w) / 2.0;
+            const dlg_y: f32 = (fh - dlg_h) / 2.0;
+
+            // Dim background
+            ui_state.drawRect(0, 0, fw, fh, .{ 0.0, 0.0, 0.0, 0.5 });
+            // Dialog box
+            ui_state.drawRect(dlg_x, dlg_y, dlg_w, dlg_h, .{ 0.15, 0.15, 0.15, 1.0 });
+            ui_state.drawRect(dlg_x, dlg_y, dlg_w, 1.0, .{ 0.3, 0.5, 0.8, 1.0 });
+            ui_state.drawText("Open file:", dlg_x + 10.0, dlg_y + 10.0, .{ 0.8, 0.8, 0.8, 1.0 });
+
+            // Text input area
+            const inp_x = dlg_x + 10.0;
+            const inp_y = dlg_y + 35.0;
+            const inp_w = dlg_w - 20.0;
+            const inp_h: f32 = 24.0;
+            ui_state.drawRect(inp_x, inp_y, inp_w, inp_h, .{ 0.08, 0.08, 0.08, 1.0 });
+            ui_state.drawRect(inp_x, inp_y + inp_h - 1.0, inp_w, 1.0, .{ 0.3, 0.5, 0.8, 1.0 });
+
+            // Handle typing into the dialog
+            if (input.char_input) |ch| {
+                if (open_path_len < open_path_buf.len) {
+                    open_path_buf[open_path_len] = ch;
+                    open_path_len += 1;
+                }
+            }
+            if (input.backspace and open_path_len > 0) {
+                open_path_len -= 1;
+            }
+
+            if (open_path_len > 0) {
+                ui_state.drawText(open_path_buf[0..open_path_len], inp_x + 4.0, inp_y + 4.0, .{ 1.0, 1.0, 1.0, 1.0 });
+            }
+
+            // Blinking cursor
+            if (@rem(@divFloor(@as(i64, @intCast(std.time.milliTimestamp())), 500), 2) == 0) {
+                ui_state.drawRect(inp_x + 4.0 + @as(f32, @floatFromInt(open_path_len)) * 16.0, inp_y + 4.0, 2.0, 16.0, .{ 1.0, 1.0, 1.0, 1.0 });
+            }
+
+            // Open button
+            const btn_w: f32 = 80.0;
+            const btn_h: f32 = 24.0;
+            const open_btn_x = dlg_x + dlg_w - btn_w - 100.0;
+            const open_btn_y = dlg_y + dlg_h - btn_h - 8.0;
+            const cancel_btn_x = dlg_x + dlg_w - btn_w - 10.0;
+
+            // Open
+            {
+                const hov = ui_state.mouse_x >= open_btn_x and ui_state.mouse_x <= open_btn_x + btn_w and
+                            ui_state.mouse_y >= open_btn_y and ui_state.mouse_y <= open_btn_y + btn_h;
+                ui_state.drawRect(open_btn_x, open_btn_y, btn_w, btn_h, if (hov) .{ 0.3, 0.5, 0.8, 1.0 } else .{ 0.2, 0.2, 0.2, 1.0 });
+                ui_state.drawText("Open", open_btn_x + 16.0, open_btn_y + 4.0, .{ 1.0, 1.0, 1.0, 1.0 });
+
+                if (hov and ui_state.mouse_clicked and open_path_len > 0) {
+                    const path = open_path_buf[0..open_path_len];
+                    const file_src = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch null;
+                    if (file_src) |src| {
+                        defer allocator.free(src);
+                        editor.deinit();
+                        editor = editor_mod.TextEditor.init(allocator, src);
+                        @memcpy(active_file[0..open_path_len], path);
+                        active_file_len = open_path_len;
+                        watcher = shader_manager.ShaderWatcher.init(allocator, active_file[0..active_file_len]);
+                        wants_compile = true;
+                        std.debug.print("Opened {s}\n", .{path});
+                    } else {
+                        std.debug.print("Failed to open {s}\n", .{path});
+                    }
+                    wants_open = false;
+                }
+            }
+            // Cancel
+            {
+                const hov = ui_state.mouse_x >= cancel_btn_x and ui_state.mouse_x <= cancel_btn_x + btn_w and
+                            ui_state.mouse_y >= open_btn_y and ui_state.mouse_y <= open_btn_y + btn_h;
+                ui_state.drawRect(cancel_btn_x, open_btn_y, btn_w, btn_h, if (hov) .{ 0.35, 0.2, 0.2, 1.0 } else .{ 0.2, 0.2, 0.2, 1.0 });
+                ui_state.drawText("Cancel", cancel_btn_x + 8.0, open_btn_y + 4.0, .{ 1.0, 1.0, 1.0, 1.0 });
+
+                if (hov and ui_state.mouse_clicked) {
+                    wants_open = false;
+                }
+            }
+
+            // Enter to confirm
+            if (input.enter and open_path_len > 0) {
+                const path = open_path_buf[0..open_path_len];
+                const file_src = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch null;
+                if (file_src) |src| {
+                    defer allocator.free(src);
+                    editor.deinit();
+                    editor = editor_mod.TextEditor.init(allocator, src);
+                    @memcpy(active_file[0..open_path_len], path);
+                    active_file_len = open_path_len;
+                    watcher = shader_manager.ShaderWatcher.init(allocator, active_file[0..active_file_len]);
+                    wants_compile = true;
+                    std.debug.print("Opened {s}\n", .{path});
+                } else {
+                    std.debug.print("Failed to open {s}\n", .{path});
+                }
+                wants_open = false;
             }
         }
 
