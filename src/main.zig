@@ -159,7 +159,7 @@ pub fn main() !void {
         {
             const file_btn_w: f32 = 70.0;
             const hovered = ui_state.mouse_x >= 0 and ui_state.mouse_x <= file_btn_w and
-                            ui_state.mouse_y >= 0 and ui_state.mouse_y <= menubar_h;
+                ui_state.mouse_y >= 0 and ui_state.mouse_y <= menubar_h;
             if (hovered or file_menu_open) {
                 ui_state.drawRect(0, 0, file_btn_w, menubar_h, .{ 0.18, 0.18, 0.18, 1.0 });
             }
@@ -207,7 +207,7 @@ pub fn main() !void {
             for (items, 0..) |label, i| {
                 const iy = menu_y + 2.0 + @as(f32, @floatFromInt(i)) * item_h;
                 const item_hovered = ui_state.mouse_x >= menu_x and ui_state.mouse_x <= menu_x + menu_w and
-                                     ui_state.mouse_y >= iy and ui_state.mouse_y <= iy + item_h;
+                    ui_state.mouse_y >= iy and ui_state.mouse_y <= iy + item_h;
                 if (item_hovered) {
                     ui_state.drawRect(menu_x, iy, menu_w, item_h, .{ 0.25, 0.4, 0.7, 1.0 });
                 }
@@ -247,9 +247,9 @@ pub fn main() !void {
             // Close menu when clicking outside
             if (ui_state.mouse_clicked) {
                 const in_menu = ui_state.mouse_x >= 0 and ui_state.mouse_x <= menu_w and
-                                ui_state.mouse_y >= menubar_h and ui_state.mouse_y <= menubar_h + menu_h;
+                    ui_state.mouse_y >= menubar_h and ui_state.mouse_y <= menubar_h + menu_h;
                 const in_btn = ui_state.mouse_x >= 0 and ui_state.mouse_x <= 70.0 and
-                               ui_state.mouse_y >= 0 and ui_state.mouse_y <= menubar_h;
+                    ui_state.mouse_y >= 0 and ui_state.mouse_y <= menubar_h;
                 if (!in_menu and !in_btn) {
                     file_menu_open = false;
                 }
@@ -301,16 +301,16 @@ pub fn main() !void {
             // Open button
             const btn_w: f32 = 80.0;
             const btn_h: f32 = 24.0;
-            const open_btn_x = dlg_x + dlg_w - btn_w - 100.0;
+            const open_btn_x = dlg_x + dlg_w - btn_w - 130.0;
             const open_btn_y = dlg_y + dlg_h - btn_h - 8.0;
-            const cancel_btn_x = dlg_x + dlg_w - btn_w - 10.0;
+            const cancel_btn_x = dlg_x + dlg_w - btn_w - 40.0;
 
             // Open
             {
                 const hov = ui_state.mouse_x >= open_btn_x and ui_state.mouse_x <= open_btn_x + btn_w and
-                            ui_state.mouse_y >= open_btn_y and ui_state.mouse_y <= open_btn_y + btn_h;
+                    ui_state.mouse_y >= open_btn_y and ui_state.mouse_y <= open_btn_y + btn_h;
                 ui_state.drawRect(open_btn_x, open_btn_y, btn_w, btn_h, if (hov) .{ 0.3, 0.5, 0.8, 1.0 } else .{ 0.2, 0.2, 0.2, 1.0 });
-                ui_state.drawText("Open", open_btn_x + 16.0, open_btn_y + 4.0, .{ 1.0, 1.0, 1.0, 1.0 });
+                ui_state.drawText("Open", open_btn_x + 8.0, open_btn_y + 4.0, .{ 1.0, 1.0, 1.0, 1.0 });
 
                 if (hov and ui_state.mouse_clicked and open_path_len > 0) {
                     const path = open_path_buf[0..open_path_len];
@@ -333,8 +333,8 @@ pub fn main() !void {
             // Cancel
             {
                 const hov = ui_state.mouse_x >= cancel_btn_x and ui_state.mouse_x <= cancel_btn_x + btn_w and
-                            ui_state.mouse_y >= open_btn_y and ui_state.mouse_y <= open_btn_y + btn_h;
-                ui_state.drawRect(cancel_btn_x, open_btn_y, btn_w, btn_h, if (hov) .{ 0.35, 0.2, 0.2, 1.0 } else .{ 0.2, 0.2, 0.2, 1.0 });
+                    ui_state.mouse_y >= open_btn_y and ui_state.mouse_y <= open_btn_y + btn_h;
+                ui_state.drawRect(cancel_btn_x, open_btn_y, btn_w + 26, btn_h, if (hov) .{ 0.35, 0.2, 0.2, 1.0 } else .{ 0.2, 0.2, 0.2, 1.0 });
                 ui_state.drawText("Cancel", cancel_btn_x + 8.0, open_btn_y + 4.0, .{ 1.0, 1.0, 1.0, 1.0 });
 
                 if (hov and ui_state.mouse_clicked) {

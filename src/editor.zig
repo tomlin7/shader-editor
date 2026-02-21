@@ -196,7 +196,7 @@ pub const TextEditor = struct {
             // Line number
             var num_buf: [8]u8 = undefined;
             const num_str = std.fmt.bufPrint(&num_buf, "{d: >4}", .{row + 1}) catch "????";
-            ui_state.drawText(num_str, panel_x + 4.0, y_pos + 2.0, .{ 0.4, 0.4, 0.4, 1.0 });
+            ui_state.drawText(num_str, panel_x - 6.0, y_pos + 2.0, .{ 0.4, 0.4, 0.4, 1.0 });
 
             // Current line highlight
             if (row == self.cursor_row) {
