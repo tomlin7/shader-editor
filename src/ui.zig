@@ -240,8 +240,8 @@ pub const UiRenderer = struct {
         unif_desc.size = 16;
         const uniform_buf = c.wgpuDeviceCreateBuffer(device, &unif_desc);
         
-        // Instance buffer (capacity for 10000 quads)
-        const cap: usize = 10000;
+        // Instance buffer (capacity for 200000 quads — bitmap font needs ~25 quads per char)
+        const cap: usize = 200000;
         var inst_desc = std.mem.zeroes(c.WGPUBufferDescriptor);
         inst_desc.usage = c.WGPUBufferUsage_Vertex | c.WGPUBufferUsage_CopyDst;
         inst_desc.size = cap * @sizeOf(UiQuad);

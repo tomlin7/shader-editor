@@ -3,43 +3,53 @@ const c = @import("gpu.zig").c;
 
 // Global error tracking for WebGPU
 pub var global_compile_err = false;
+pub var global_error_msg: [1024]u8 = undefined;
+pub var global_error_len: usize = 0;
 
 pub fn globalDeviceErrorCb(typ: c.WGPUErrorType, msg: [*c]const u8, userdata: ?*anyopaque) callconv(.c) void {
-    _ = userdata; _ = typ;
+    _ = userdata;
+    _ = typ;
     global_compile_err = true;
-    std.debug.print("\n=== WebGPU Compilation Error ===\n{s}\n================================\n", .{if(msg != null) msg else @as([*c]const u8, "Unknown Error")});
+    // Capture error message
+    if (msg != null) {
+        const s: [*c]const u8 = msg;
+        var len: usize = 0;
+        while (s[len] != 0 and len < global_error_msg.len - 1) : (len += 1) {}
+        @memcpy(global_error_msg[0..len], s[0..len]);
+        global_error_len = len;
+    } else {
+        const fallback = "Unknown Error";
+        @memcpy(global_error_msg[0..fallback.len], fallback);
+        global_error_len = fallback.len;
+    }
+    std.debug.print("\n=== WebGPU Compilation Error ===\n{s}\n================================\n", .{global_error_msg[0..global_error_len]});
 }
 
-pub fn loadPipeline(allocator: std.mem.Allocator, device: c.WGPUDevice, bind_group_layout: c.WGPUBindGroupLayout, path: []const u8, fallback_format: c.WGPUTextureFormat) !?c.WGPURenderPipeline {
-    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
-        std.debug.print("Failed to open shader file: {any}\n", .{err});
-        return null; 
-    };
-    defer file.close();
+pub const CompileResult = struct {
+    pipeline: ?c.WGPURenderPipeline,
+    error_msg: ?[]const u8,
+};
 
-    const content = file.readToEndAlloc(allocator, 1024 * 1024) catch return null;
-    defer allocator.free(content);
-
-    // Provide a valid null-terminated string using standard methods or allocate
-    const z_content = try allocator.dupeZ(u8, content);
-    defer allocator.free(z_content);
-
+fn buildPipeline(device: c.WGPUDevice, bind_group_layout: c.WGPUBindGroupLayout, z_source: [:0]const u8, format: c.WGPUTextureFormat) CompileResult {
     var wgsl_desc = std.mem.zeroes(c.WGPUShaderModuleWGSLDescriptor);
     wgsl_desc.chain.next = null;
     wgsl_desc.chain.sType = c.WGPUSType_ShaderModuleWGSLDescriptor;
-    wgsl_desc.code = @ptrCast(z_content.ptr);
+    wgsl_desc.code = @ptrCast(z_source.ptr);
 
     var sm_desc = std.mem.zeroes(c.WGPUShaderModuleDescriptor);
     sm_desc.nextInChain = &wgsl_desc.chain;
 
     global_compile_err = false;
+    global_error_len = 0;
 
     const shader_module = c.wgpuDeviceCreateShaderModule(device, &sm_desc);
-    
-    // Check if error callback fired during module creation
+
     if (global_compile_err or shader_module == null) {
         if (shader_module != null) c.wgpuShaderModuleRelease(shader_module);
-        return null;
+        return .{
+            .pipeline = null,
+            .error_msg = if (global_error_len > 0) global_error_msg[0..global_error_len] else "Unknown compilation error",
+        };
     }
     defer c.wgpuShaderModuleRelease(shader_module);
 
@@ -51,7 +61,6 @@ pub fn loadPipeline(allocator: std.mem.Allocator, device: c.WGPUDevice, bind_gro
 
     var rp_desc = std.mem.zeroes(c.WGPURenderPipelineDescriptor);
     rp_desc.layout = pipeline_layout;
-
     rp_desc.vertex.module = shader_module;
     rp_desc.vertex.entryPoint = "vs_main";
     rp_desc.vertex.bufferCount = 0;
@@ -73,7 +82,7 @@ pub fn loadPipeline(allocator: std.mem.Allocator, device: c.WGPUDevice, bind_gro
     blend.alpha.dstFactor = c.WGPUBlendFactor_Zero;
 
     var target = std.mem.zeroes(c.WGPUColorTargetState);
-    target.format = fallback_format;
+    target.format = format;
     target.blend = &blend;
     target.writeMask = c.WGPUColorWriteMask_All;
 
@@ -87,13 +96,34 @@ pub fn loadPipeline(allocator: std.mem.Allocator, device: c.WGPUDevice, bind_gro
     const pipeline = c.wgpuDeviceCreateRenderPipeline(device, &rp_desc);
 
     if (global_compile_err or pipeline == null) {
-        if (pipeline != null) {
-            c.wgpuRenderPipelineRelease(pipeline);
-        }
-        return null;
+        if (pipeline != null) c.wgpuRenderPipelineRelease(pipeline);
+        return .{
+            .pipeline = null,
+            .error_msg = if (global_error_len > 0) global_error_msg[0..global_error_len] else "Pipeline creation failed",
+        };
     }
 
-    return pipeline;
+    return .{ .pipeline = pipeline, .error_msg = null };
+}
+
+pub fn compileFromSource(allocator: std.mem.Allocator, device: c.WGPUDevice, bind_group_layout: c.WGPUBindGroupLayout, source: []const u8, format: c.WGPUTextureFormat) CompileResult {
+    const z_source = allocator.dupeZ(u8, source) catch return .{ .pipeline = null, .error_msg = "Out of memory" };
+    defer allocator.free(z_source);
+    return buildPipeline(device, bind_group_layout, z_source, format);
+}
+
+pub fn loadPipeline(allocator: std.mem.Allocator, device: c.WGPUDevice, bind_group_layout: c.WGPUBindGroupLayout, path: []const u8, format: c.WGPUTextureFormat) !?c.WGPURenderPipeline {
+    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+        std.debug.print("Failed to open shader file: {any}\n", .{err});
+        return null;
+    };
+    defer file.close();
+
+    const content = file.readToEndAlloc(allocator, 1024 * 1024) catch return null;
+    defer allocator.free(content);
+
+    const result = compileFromSource(allocator, device, bind_group_layout, content, format);
+    return result.pipeline;
 }
 
 pub const ShaderWatcher = struct {
@@ -114,12 +144,11 @@ pub const ShaderWatcher = struct {
 
     pub fn checkModified(self: *ShaderWatcher) bool {
         const now = std.time.milliTimestamp();
-        // 200ms debounce
         if (now - self.last_check_time < 200) return false;
-        
+
         self.last_check_time = now;
         const stat = std.fs.cwd().statFile(self.path) catch return false;
-        
+
         if (stat.mtime > self.last_mtime) {
             self.last_mtime = stat.mtime;
             return true;

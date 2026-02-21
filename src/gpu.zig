@@ -37,6 +37,13 @@ pub const GpuState = struct {
     uniform_buf: c.WGPUBuffer,
     bind_group_layout: c.WGPUBindGroupLayout,
     bind_group: c.WGPUBindGroup,
+
+    pub fn reconfigureSurface(self: *GpuState, width: u32, height: u32) void {
+        if (width == 0 or height == 0) return;
+        self.config.width = width;
+        self.config.height = height;
+        c.wgpuSurfaceConfigure(self.surface, &self.config);
+    }
 };
 
 fn onAdapterRequest(status: c.WGPURequestAdapterStatus, adapter: c.WGPUAdapter, message: [*c]const u8, userdata: ?*anyopaque) callconv(.c) void {
