@@ -48,6 +48,8 @@ pub fn main() !void {
     var error_len: usize = 0;
     var show_success: bool = false;
     var status_time: i64 = 0;
+    var file_menu_open: bool = false;
+    var wants_compile: bool = false;
 
     const start_time = std.time.milliTimestamp();
 
@@ -59,11 +61,14 @@ pub fn main() !void {
 
         const input = platform.consumeInput();
 
-        // Feed input to editor
-        editor.handleInput(input);
+        // Feed input to editor (only when menu is closed)
+        if (!file_menu_open) {
+            editor.handleInput(input);
+        }
 
         // Ctrl+S: compile from editor buffer
-        if (input.ctrl_s) {
+        if (input.ctrl_s or wants_compile) {
+            wants_compile = false;
             const source = editor.getContent(allocator) catch null;
             if (source) |src| {
                 defer allocator.free(src);
@@ -117,32 +122,108 @@ pub fn main() !void {
         const fh: f32 = @floatFromInt(win_h);
 
         // Layout: left half = editor, right half = preview
+        const menubar_h: f32 = 30.0;
         const split: f32 = @round(fw * 0.5);
         const error_panel_h: f32 = if (error_len > 0 or show_success) 40.0 else 0.0;
-        const editor_h: f32 = fh - error_panel_h;
+        const editor_h: f32 = fh - menubar_h - error_panel_h;
 
         // Build UI
         ui_state.beginFrame(&window);
 
-        // Editor panel
-        editor.render(&ui_state, 0, 0, split, editor_h);
+        // Menu bar background (full width)
+        ui_state.drawRect(0, 0, fw, menubar_h, .{ 0.12, 0.12, 0.12, 1.0 });
+        ui_state.drawRect(0, menubar_h - 1.0, fw, 1.0, .{ 0.25, 0.25, 0.25, 1.0 });
+
+        // File menu button
+        {
+            const file_btn_w: f32 = 70.0;
+            const hovered = ui_state.mouse_x >= 0 and ui_state.mouse_x <= file_btn_w and
+                            ui_state.mouse_y >= 0 and ui_state.mouse_y <= menubar_h;
+            if (hovered or file_menu_open) {
+                ui_state.drawRect(0, 0, file_btn_w, menubar_h, .{ 0.18, 0.18, 0.18, 1.0 });
+            }
+            if (hovered and ui_state.mouse_clicked) {
+                file_menu_open = !file_menu_open;
+            }
+            ui_state.drawText("File", 12.0, 8.0, .{ 0.9, 0.9, 0.9, 1.0 });
+        }
+
+        // File indicator
+        ui_state.drawText("shader.wgsl", 250.0, 8.0, .{ 0.5, 0.5, 0.5, 1.0 });
+        // Shortcut hint
+        ui_state.drawText("Ctrl+S compile", split + 8.0, 8.0, .{ 0.4, 0.4, 0.4, 1.0 });
+
+        // Editor panel (below menubar)
+        editor.render(&ui_state, 0, menubar_h, split, editor_h);
 
         // Error / success panel
         if (error_len > 0) {
-            ui_state.drawRect(0, editor_h, split, error_panel_h, .{ 0.15, 0.02, 0.02, 1.0 });
-            ui_state.drawText(error_msg[0..error_len], 8.0, editor_h + 12.0, .{ 1.0, 0.3, 0.3, 1.0 });
+            ui_state.drawRect(0, menubar_h + editor_h, split, error_panel_h, .{ 0.15, 0.02, 0.02, 1.0 });
+            ui_state.drawText(error_msg[0..error_len], 8.0, menubar_h + editor_h + 12.0, .{ 1.0, 0.3, 0.3, 1.0 });
         } else if (show_success) {
-            // Auto-hide after 2 seconds
             if (current_time - status_time < 2000) {
-                ui_state.drawRect(0, editor_h, split, error_panel_h, .{ 0.02, 0.12, 0.02, 1.0 });
-                ui_state.drawText("Compiled OK!", 8.0, editor_h + 12.0, .{ 0.3, 1.0, 0.3, 1.0 });
+                ui_state.drawRect(0, menubar_h + editor_h, split, error_panel_h, .{ 0.02, 0.12, 0.02, 1.0 });
+                ui_state.drawText("Compiled OK!", 8.0, menubar_h + editor_h + 12.0, .{ 0.3, 1.0, 0.3, 1.0 });
             } else {
                 show_success = false;
             }
         }
 
-        // Status bar hint (rendered over shader preview area)
-        ui_state.drawText("Ctrl+S to compile", split + 8.0, fh - 20.0, .{ 0.3, 0.3, 0.3, 1.0 });
+        // File menu dropdown (rendered LAST so it appears on top)
+        if (file_menu_open) {
+            const menu_x: f32 = 0;
+            const menu_y: f32 = menubar_h;
+            const menu_w: f32 = 200.0;
+            const item_h: f32 = 28.0;
+            const items = [_][]const u8{ "New", "Save         Ctrl+S", "Save to file..." };
+            const menu_h: f32 = item_h * @as(f32, @floatFromInt(items.len)) + 4.0;
+
+            // Shadow + background
+            ui_state.drawRect(menu_x + 2, menu_y + 2, menu_w, menu_h, .{ 0.0, 0.0, 0.0, 0.4 });
+            ui_state.drawRect(menu_x, menu_y, menu_w, menu_h, .{ 0.15, 0.15, 0.15, 1.0 });
+            ui_state.drawRect(menu_x, menu_y, menu_w, 1.0, .{ 0.25, 0.25, 0.25, 1.0 });
+
+            for (items, 0..) |label, i| {
+                const iy = menu_y + 2.0 + @as(f32, @floatFromInt(i)) * item_h;
+                const item_hovered = ui_state.mouse_x >= menu_x and ui_state.mouse_x <= menu_x + menu_w and
+                                     ui_state.mouse_y >= iy and ui_state.mouse_y <= iy + item_h;
+                if (item_hovered) {
+                    ui_state.drawRect(menu_x, iy, menu_w, item_h, .{ 0.25, 0.4, 0.7, 1.0 });
+                }
+                ui_state.drawText(label, menu_x + 12.0, iy + 6.0, .{ 0.9, 0.9, 0.9, 1.0 });
+
+                if (item_hovered and ui_state.mouse_clicked) {
+                    file_menu_open = false;
+                    if (i == 0) {
+                        // New: clear editor
+                        editor.deinit();
+                        editor = editor_mod.TextEditor.init(allocator, "// New shader\n");
+                    } else if (i == 1) {
+                        // Save: compile
+                        wants_compile = true;
+                    } else if (i == 2) {
+                        // Save to file
+                        const src = editor.getContent(allocator) catch null;
+                        if (src) |content| {
+                            defer allocator.free(content);
+                            std.fs.cwd().writeFile(.{ .sub_path = "shader.wgsl", .data = content }) catch {};
+                            std.debug.print("Saved to shader.wgsl\n", .{});
+                        }
+                    }
+                }
+            }
+
+            // Close menu when clicking outside
+            if (ui_state.mouse_clicked) {
+                const in_menu = ui_state.mouse_x >= 0 and ui_state.mouse_x <= menu_w and
+                                ui_state.mouse_y >= menubar_h and ui_state.mouse_y <= menubar_h + menu_h;
+                const in_btn = ui_state.mouse_x >= 0 and ui_state.mouse_x <= 70.0 and
+                               ui_state.mouse_y >= 0 and ui_state.mouse_y <= menubar_h;
+                if (!in_menu and !in_btn) {
+                    file_menu_open = false;
+                }
+            }
+        }
 
         ui_state.endFrame();
 
