@@ -12,6 +12,12 @@ zig build run
 
 once running, a colorful triangle will render. leave the window open. open `shader.wgsl` and start editing.
 
+
+
+https://github.com/user-attachments/assets/b61c7376-4ae6-4864-a8fe-e296a19adc6f
+
+
+
 ```
 ┌──────────────────────┬──────────────────────┐
 │                      │                      │
